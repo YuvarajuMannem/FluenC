@@ -1,0 +1,250 @@
+.row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+  align-items: flex-start;
+}
+
+.aiRow { flex-direction: row; }
+.userRow { flex-direction: row-reverse; }
+
+.aiAvatar {
+  width: 32px; height: 32px;
+  background: var(--ink);
+  color: var(--gold);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-display);
+  font-size: 0.85rem; font-weight: 700; font-style: italic;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.aiBubble {
+  background: white;
+  border: 1px solid var(--cream);
+  border-radius: 4px 16px 16px 16px;
+  padding: 14px 16px;
+  max-width: 72%;
+  box-shadow: var(--shadow-sm);
+  line-height: 1.65;
+  font-size: 0.95rem;
+  color: var(--ink);
+}
+
+.userSide {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: 80%;
+}
+
+.userBubble {
+  background: var(--ink);
+  color: var(--parchment);
+  border-radius: 16px 4px 16px 16px;
+  padding: 12px 16px;
+  font-size: 0.95rem;
+  line-height: 1.55;
+}
+
+.originalWithErrors {
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-color: var(--rose-light);
+  text-underline-offset: 3px;
+}
+
+/* Analysis panel */
+.analysis {
+  background: white;
+  border: 1px solid var(--cream);
+  border-radius: 12px;
+  padding: 14px 16px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 0.88rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.cefrRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.cefrBadge {
+  padding: 3px 12px;
+  border-radius: 100px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.scoreBarWrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 80px;
+}
+
+.scoreBarTrack {
+  flex: 1;
+  height: 5px;
+  background: var(--cream);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.scoreBarFill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.8s ease;
+}
+
+.scoreNum {
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+.correction {
+  background: var(--emerald-pale);
+  border: 1px solid rgba(82,183,136,0.25);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.correctionLabel {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--emerald);
+  margin-bottom: 4px;
+}
+
+.correctedText {
+  color: var(--emerald);
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.noErrors {
+  font-size: 0.82rem;
+  color: var(--emerald);
+  font-weight: 500;
+}
+
+.toggleMistakes {
+  background: none;
+  border: 1px solid var(--cream);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  color: var(--ink-muted);
+  cursor: pointer;
+  transition: var(--transition);
+  text-align: left;
+  width: fit-content;
+}
+.toggleMistakes:hover { background: var(--parchment-dark); }
+
+.mistakes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mistakeItem {
+  background: var(--parchment);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.mistakeType {
+  width: fit-content;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.mistakeContent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wrong {
+  color: var(--rose);
+  text-decoration: line-through;
+  font-weight: 500;
+}
+
+.arrow {
+  color: var(--ink-muted);
+}
+
+.right {
+  color: var(--emerald);
+  font-weight: 600;
+  background: var(--emerald-pale);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.explanation {
+  font-size: 0.82rem;
+  color: var(--ink-muted);
+  line-height: 1.5;
+}
+
+.cefrElements {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cefrGroup {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.cefrGroupLabel {
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.cefrTag {
+  padding: 2px 8px;
+  border-radius: 100px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.feedback {
+  font-style: italic;
+  color: var(--ink-muted);
+  font-size: 0.83rem;
+  border-top: 1px solid var(--parchment-dark);
+  padding-top: 8px;
+  margin-top: 2px;
+  line-height: 1.5;
+}
