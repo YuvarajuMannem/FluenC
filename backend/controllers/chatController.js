@@ -1,46 +1,5 @@
 const User = require('../models/User');
 
-// Supports OpenAI (if OPENAI_API_KEY set) or Gemini (if GEMINI_API_KEY set)
-let callAI;
-
-if (process.env.OPENAI_API_KEY) {
-  const OpenAI = require('openai');
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  callAI = async (messages) => {
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages,
-      temperature: 0.7,
-      max_tokens: 1000,
-    });
-    return completion.choices[0].message.content;
-  };
-} else {
-  // Free Gemini fallback
-  callAI = async (messages) => {
-    const systemMsg = messages.find(m => m.role === 'system')?.content || '';
-    const chatMessages = messages.filter(m => m.role !== 'system');
-    const contents = chatMessages.map(m => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }],
-    }));
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          system_instruction: { parts: [{ text: systemMsg }] },
-          contents,
-          generationConfig: { temperature: 0.7, maxOutputTokens: 1000 },
-        }),
-      }
-    );
-    const data = await res.json();
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  };
-}
-
 const SYSTEM_PROMPT = `You are FluenC, an expert English language coach specializing in C1/C2 (Advanced/Mastery) level CEFR assessment. Your role is to:
 
 1. ENGAGE in natural conversation on any topic the user wants to discuss
@@ -78,6 +37,119 @@ CEFR Guidelines:
 
 Be encouraging and educational. The reply should feel like a natural conversation partner, not a robot.`;
 
+// Default fallback response when AI fails to parse
+const fallbackResponse = (message) => ({
+  reply: "I'm here to help you practice English! Could you tell me a bit about yourself or a topic you'd like to discuss?",
+  hasErrors: false,
+  correctedText: message,
+  mistakes: [],
+  cefrAnalysis: {
+    overallLevel: 'B1',
+    score: 50,
+    c1Elements: [],
+    c2Elements: [],
+    feedback: 'Keep practicing — every message helps!',
+  },
+});
+
+// Call Gemini API using fetch (no SDK needed)
+const callGemini = async (messages) => {
+  const systemMsg = messages.find(m => m.role === 'system')?.content || '';
+  const chatMessages = messages.filter(m => m.role !== 'system');
+
+  const contents = chatMessages.map(m => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: m.content }],
+  }));
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
+
+  console.log('Calling Gemini API...');
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      system_instruction: { parts: [{ text: systemMsg }] },
+      contents,
+      generationConfig: { temperature: 0.7, maxOutputTokens: 1000 },
+    }),
+  });
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    console.error('Gemini API error response:', JSON.stringify(data));
+    throw new Error(`Gemini API error: ${data?.error?.message || JSON.stringify(data)}`);
+  }
+
+  console.log('Gemini raw response:', JSON.stringify(data).slice(0, 300));
+
+  const text =
+    data.candidates?.[0]?.content?.parts?.[0]?.text ||
+    data.candidates?.[0]?.output ||
+    '';
+
+  if (!text) {
+    console.error('Gemini returned no text. Full response:', JSON.stringify(data));
+    throw new Error('Gemini returned empty text');
+  }
+
+  console.log('Gemini responded OK, length:', text.length);
+  return text;
+};
+
+// Call OpenAI API
+const callOpenAI = async (messages) => {
+  const OpenAI = require('openai');
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  console.log('Calling OpenAI...');
+  const completion = await openai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages,
+    temperature: 0.7,
+    max_tokens: 1000,
+  });
+  return completion.choices[0].message.content;
+};
+
+// Auto-select AI provider
+const callAI = async (messages) => {
+  if (process.env.OPENAI_API_KEY) {
+    return callOpenAI(messages);
+  } else if (process.env.GEMINI_API_KEY) {
+    return callGemini(messages);
+  } else {
+    throw new Error('No AI API key configured. Set OPENAI_API_KEY or GEMINI_API_KEY.');
+  }
+};
+
+// Parse AI response safely
+const parseAIResponse = (rawContent, message) => {
+  try {
+    const cleaned = rawContent
+      .replace(/```json\n?/g, '')
+      .replace(/```\n?/g, '')
+      .trim();
+    const parsed = JSON.parse(cleaned);
+    // Ensure reply is never empty
+    if (!parsed.reply || parsed.reply.trim() === '') {
+      parsed.reply = "That's interesting! Could you elaborate on that?";
+    }
+    return parsed;
+  } catch (e) {
+    console.error('JSON parse failed. Raw content was:', rawContent.slice(0, 300));
+    // If raw content is non-empty text, use it as the reply
+    if (rawContent && rawContent.trim().length > 0) {
+      return {
+        ...fallbackResponse(message),
+        reply: rawContent.trim().slice(0, 500),
+      };
+    }
+    return fallbackResponse(message);
+  }
+};
+
 // @desc Send message and get AI correction + analysis
 // @route POST /api/chat/message
 const sendMessage = async (req, res) => {
@@ -112,72 +184,55 @@ const sendMessage = async (req, res) => {
       conversation = user.conversations[convIndex];
     }
 
-    // Build conversation history for context (last 10 messages)
+    // Build conversation history (last 10 messages)
     const recentMessages = conversation.messages.slice(-10).map((m) => ({
       role: m.role,
       content: m.role === 'user' ? m.originalText || m.content : m.content,
     }));
 
-    // Call AI (OpenAI or Gemini depending on env vars)
-    const rawContent = await callAI([
-      { role: 'system', content: SYSTEM_PROMPT },
-      ...recentMessages,
-      { role: 'user', content: message },
-    ]);
-
+    // Call AI
     let aiResponse;
-
     try {
-      // Clean up potential markdown wrapping
-      const cleaned = rawContent
-        .replace(/```json\n?/g, '')
-        .replace(/```\n?/g, '')
-        .trim();
-      aiResponse = JSON.parse(cleaned);
-    } catch (parseError) {
-      // Fallback if JSON parsing fails
-      aiResponse = {
-        reply: rawContent,
-        hasErrors: false,
-        correctedText: message,
-        mistakes: [],
-        cefrAnalysis: {
-          overallLevel: 'B2',
-          score: 60,
-          c1Elements: [],
-          c2Elements: [],
-          feedback: 'Keep practicing your English!',
-        },
-      };
+      const rawContent = await callAI([
+        { role: 'system', content: SYSTEM_PROMPT },
+        ...recentMessages,
+        { role: 'user', content: message },
+      ]);
+      aiResponse = parseAIResponse(rawContent, message);
+    } catch (aiError) {
+      console.error('AI call failed:', aiError.message);
+      aiResponse = fallbackResponse(message);
     }
 
-    // Save user message
+    // Guarantee content is never empty (prevents Mongoose validation error)
+    const replyContent = (aiResponse.reply || '').trim() || "I'm here to help! Please continue.";
+    const correctedContent = (aiResponse.correctedText || message).trim() || message;
+
+    // Save messages
     const userMsg = {
       role: 'user',
       content: message,
       originalText: message,
-      correctedText: aiResponse.correctedText || message,
+      correctedText: correctedContent,
       mistakes: aiResponse.mistakes || [],
       cefrAnalysis: aiResponse.cefrAnalysis || null,
     };
 
-    // Save assistant reply
     const assistantMsg = {
       role: 'assistant',
-      content: aiResponse.reply,
+      content: replyContent,
     };
 
     user.conversations[convIndex].messages.push(userMsg);
     user.conversations[convIndex].messages.push(assistantMsg);
     user.conversations[convIndex].updatedAt = new Date();
 
-    // Update user stats
+    // Update stats
     user.stats.totalMessages += 1;
     const level = aiResponse.cefrAnalysis?.overallLevel;
     if (level === 'C1') user.stats.c1Count += 1;
     if (level === 'C2') user.stats.c2Count += 1;
 
-    // Running average score
     const score = aiResponse.cefrAnalysis?.score || 0;
     user.stats.averageScore = Math.round(
       (user.stats.averageScore * (user.stats.totalMessages - 1) + score) /
@@ -190,10 +245,10 @@ const sendMessage = async (req, res) => {
 
     res.json({
       conversationId: savedConv._id,
-      reply: aiResponse.reply,
+      reply: replyContent,
       analysis: {
         originalText: message,
-        correctedText: aiResponse.correctedText || message,
+        correctedText: correctedContent,
         hasErrors: aiResponse.hasErrors || false,
         mistakes: aiResponse.mistakes || [],
         cefrAnalysis: aiResponse.cefrAnalysis || null,
@@ -201,13 +256,12 @@ const sendMessage = async (req, res) => {
       stats: user.stats,
     });
   } catch (error) {
-    console.error('Chat error:', error);
-    if (error.code === 'insufficient_quota') {
-      return res
-        .status(429)
-        .json({ message: 'OpenAI quota exceeded. Please check your API key.' });
-    }
-    res.status(500).json({ message: 'Error processing your message' });
+    console.error('sendMessage error:', error.message);
+    console.error('Stack:', error.stack);
+    res.status(500).json({
+      message: 'Error processing your message',
+      detail: error.message,
+    });
   }
 };
 
@@ -225,7 +279,6 @@ const getConversations = async (req, res) => {
         updatedAt: c.updatedAt,
       }))
       .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
-
     res.json(convSummaries);
   } catch (error) {
     res.status(500).json({ message: 'Error fetching conversations' });
@@ -240,11 +293,9 @@ const getConversation = async (req, res) => {
     const conversation = user.conversations.find(
       (c) => c._id.toString() === req.params.id
     );
-
     if (!conversation) {
       return res.status(404).json({ message: 'Conversation not found' });
     }
-
     res.json(conversation);
   } catch (error) {
     res.status(500).json({ message: 'Error fetching conversation' });
