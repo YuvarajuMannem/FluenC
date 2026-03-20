@@ -1,7 +1,45 @@
-const OpenAI = require('openai');
 const User = require('../models/User');
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Supports OpenAI (if OPENAI_API_KEY set) or Gemini (if GEMINI_API_KEY set)
+let callAI;
+
+if (process.env.OPENAI_API_KEY) {
+  const OpenAI = require('openai');
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  callAI = async (messages) => {
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages,
+      temperature: 0.7,
+      max_tokens: 1000,
+    });
+    return completion.choices[0].message.content;
+  };
+} else {
+  // Free Gemini fallback
+  callAI = async (messages) => {
+    const systemMsg = messages.find(m => m.role === 'system')?.content || '';
+    const chatMessages = messages.filter(m => m.role !== 'system');
+    const contents = chatMessages.map(m => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }],
+    }));
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: systemMsg }] },
+          contents,
+          generationConfig: { temperature: 0.7, maxOutputTokens: 1000 },
+        }),
+      }
+    );
+    const data = await res.json();
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  };
+}
 
 const SYSTEM_PROMPT = `You are FluenC, an expert English language coach specializing in C1/C2 (Advanced/Mastery) level CEFR assessment. Your role is to:
 
@@ -18,7 +56,7 @@ For EVERY user message, respond ONLY with a valid JSON object (no markdown, no c
   "mistakes": [
     {
       "original": "the wrong phrase",
-      "corrected": "the right phrase", 
+      "corrected": "the right phrase",
       "explanation": "Why this is wrong and the correct rule",
       "type": "grammar|vocabulary|structure|punctuation"
     }
@@ -74,26 +112,20 @@ const sendMessage = async (req, res) => {
       conversation = user.conversations[convIndex];
     }
 
-    // Build conversation history for OpenAI context (last 10 messages)
+    // Build conversation history for context (last 10 messages)
     const recentMessages = conversation.messages.slice(-10).map((m) => ({
       role: m.role,
       content: m.role === 'user' ? m.originalText || m.content : m.content,
     }));
 
-    // Call OpenAI
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        ...recentMessages,
-        { role: 'user', content: message },
-      ],
-      temperature: 0.7,
-      max_tokens: 1000,
-    });
+    // Call AI (OpenAI or Gemini depending on env vars)
+    const rawContent = await callAI([
+      { role: 'system', content: SYSTEM_PROMPT },
+      ...recentMessages,
+      { role: 'user', content: message },
+    ]);
 
     let aiResponse;
-    const rawContent = completion.choices[0].message.content;
 
     try {
       // Clean up potential markdown wrapping
