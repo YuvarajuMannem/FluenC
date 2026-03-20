@@ -1,45 +1,41 @@
 const User = require('../models/User');
 
-const SYSTEM_PROMPT = `You are FluenC, an expert English language coach specializing in C1/C2 (Advanced/Mastery) level CEFR assessment. Your role is to:
+const SYSTEM_PROMPT = `You are FluenC, an AI English language coach. Analyze the user's English and respond ONLY with a JSON object.
 
-1. ENGAGE in natural conversation on any topic the user wants to discuss
-2. CORRECT grammar, vocabulary, and structural mistakes
-3. ANALYZE the CEFR level of the user's language
-4. PROVIDE encouraging, constructive feedback
+STRICT RULES:
+- Output ONLY raw JSON. No markdown. No code blocks. No extra text before or after.
+- The JSON must be valid and parseable.
 
-For EVERY user message, respond ONLY with a valid JSON object (no markdown, no code blocks) in this exact format:
+JSON format to return:
 {
-  "reply": "Your conversational response to continue the dialogue naturally",
-  "hasErrors": true/false,
-  "correctedText": "The corrected version of what the user said (same if no errors)",
-  "mistakes": [
-    {
-      "original": "the wrong phrase",
-      "corrected": "the right phrase",
-      "explanation": "Why this is wrong and the correct rule",
-      "type": "grammar|vocabulary|structure|punctuation"
-    }
-  ],
+  "reply": "your conversational response here (be natural, engaging, ask follow-up questions)",
+  "hasErrors": false,
+  "correctedText": "corrected version of user input (copy original if no errors)",
+  "mistakes": [],
   "cefrAnalysis": {
-    "overallLevel": "A1|A2|B1|B2|C1|C2",
-    "score": 0-100,
-    "c1Elements": ["list of C1-level vocabulary/structures found, or empty array"],
-    "c2Elements": ["list of C2-level vocabulary/structures found, or empty array"],
-    "feedback": "Brief encouraging feedback about their English level in this message"
+    "overallLevel": "B1",
+    "score": 55,
+    "c1Elements": [],
+    "c2Elements": [],
+    "feedback": "encouraging feedback here"
   }
 }
 
-CEFR Guidelines:
-- C2 elements: highly sophisticated vocabulary, complex nominalizations, advanced idiomatic expressions, nuanced conditionals, inversion for emphasis
-- C1 elements: advanced vocabulary (e.g. 'consequently', 'albeit', 'whereby'), complex sentence structures, passive voice, subordinate clauses, academic register
-- B2: varied vocabulary, compound sentences, some idiomatic language
-- B1 and below: simple vocabulary, basic sentence structures
+For mistakes array, each item is:
+{"original": "wrong phrase", "corrected": "right phrase", "explanation": "why it is wrong", "type": "grammar"}
 
-Be encouraging and educational. The reply should feel like a natural conversation partner, not a robot.`;
+CEFR scoring guide:
+- A1/A2 (score 10-30): very simple words, basic sentences like "I go school"
+- B1 (score 31-50): simple but correct sentences, common vocabulary
+- B2 (score 51-70): good vocabulary, compound sentences, some idioms
+- C1 (score 71-85): advanced vocabulary like "consequently" "albeit", complex structures, subordinate clauses
+- C2 (score 86-100): mastery level, sophisticated idioms, nominalizations, inversion
 
-// Default fallback response when AI fails to parse
+Example of a correct response:
+{"reply":"That sounds wonderful! What is your favorite part of studying computer science?","hasErrors":false,"correctedText":"I am a computer science student.","mistakes":[],"cefrAnalysis":{"overallLevel":"B1","score":48,"c1Elements":[],"c2Elements":[],"feedback":"Good clear sentence! Try using words like 'currently' or 'pursuing' to reach B2 level."}}`;
+
 const fallbackResponse = (message) => ({
-  reply: "I'm here to help you practice English! Could you tell me a bit about yourself or a topic you'd like to discuss?",
+  reply: "That's great! Tell me more about yourself or any topic you'd like to discuss in English.",
   hasErrors: false,
   correctedText: message,
   mistakes: [],
@@ -52,7 +48,6 @@ const fallbackResponse = (message) => ({
   },
 });
 
-// Call Gemini API using fetch (no SDK needed)
 const callGemini = async (messages) => {
   const systemMsg = messages.find(m => m.role === 'system')?.content || '';
   const chatMessages = messages.filter(m => m.role !== 'system');
@@ -64,88 +59,87 @@ const callGemini = async (messages) => {
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
 
-  console.log('Calling Gemini API...');
-
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       system_instruction: { parts: [{ text: systemMsg }] },
       contents,
-      generationConfig: { temperature: 0.7, maxOutputTokens: 1000 },
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: 1000,
+        responseMimeType: 'application/json',
+      },
     }),
   });
 
   const data = await res.json();
 
   if (!res.ok) {
-    console.error('Gemini API error response:', JSON.stringify(data));
-    throw new Error(`Gemini API error: ${data?.error?.message || JSON.stringify(data)}`);
+    console.error('Gemini error:', JSON.stringify(data));
+    throw new Error(`Gemini API error: ${data?.error?.message || 'unknown'}`);
   }
 
-  console.log('Gemini raw response:', JSON.stringify(data).slice(0, 300));
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  console.log('Gemini raw:', text.slice(0, 400));
 
-  const text =
-    data.candidates?.[0]?.content?.parts?.[0]?.text ||
-    data.candidates?.[0]?.output ||
-    '';
-
-  if (!text) {
-    console.error('Gemini returned no text. Full response:', JSON.stringify(data));
-    throw new Error('Gemini returned empty text');
-  }
-
-  console.log('Gemini responded OK, length:', text.length);
+  if (!text) throw new Error('Gemini returned empty text');
   return text;
 };
 
-// Call OpenAI API
 const callOpenAI = async (messages) => {
   const OpenAI = require('openai');
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  console.log('Calling OpenAI...');
   const completion = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
     messages,
     temperature: 0.7,
     max_tokens: 1000,
+    response_format: { type: 'json_object' },
   });
   return completion.choices[0].message.content;
 };
 
-// Auto-select AI provider
 const callAI = async (messages) => {
   if (process.env.OPENAI_API_KEY) {
+    console.log('Using OpenAI...');
     return callOpenAI(messages);
   } else if (process.env.GEMINI_API_KEY) {
+    console.log('Using Gemini...');
     return callGemini(messages);
   } else {
-    throw new Error('No AI API key configured. Set OPENAI_API_KEY or GEMINI_API_KEY.');
+    throw new Error('No AI API key set. Add OPENAI_API_KEY or GEMINI_API_KEY to env vars.');
   }
 };
 
-// Parse AI response safely
 const parseAIResponse = (rawContent, message) => {
   try {
+    // Strip any accidental markdown wrapping
     const cleaned = rawContent
-      .replace(/```json\n?/g, '')
-      .replace(/```\n?/g, '')
+      .replace(/^```json\s*/i, '')
+      .replace(/^```\s*/i, '')
+      .replace(/```\s*$/i, '')
       .trim();
+
     const parsed = JSON.parse(cleaned);
-    // Ensure reply is never empty
-    if (!parsed.reply || parsed.reply.trim() === '') {
-      parsed.reply = "That's interesting! Could you elaborate on that?";
+
+    // Validate required fields exist
+    if (!parsed.reply || typeof parsed.reply !== 'string' || !parsed.reply.trim()) {
+      parsed.reply = "Interesting! Could you tell me more about that?";
     }
+    if (!parsed.correctedText || !parsed.correctedText.trim()) {
+      parsed.correctedText = message;
+    }
+    if (!Array.isArray(parsed.mistakes)) parsed.mistakes = [];
+    if (!parsed.cefrAnalysis) {
+      parsed.cefrAnalysis = { overallLevel: 'B1', score: 50, c1Elements: [], c2Elements: [], feedback: 'Good effort!' };
+    }
+    if (!Array.isArray(parsed.cefrAnalysis.c1Elements)) parsed.cefrAnalysis.c1Elements = [];
+    if (!Array.isArray(parsed.cefrAnalysis.c2Elements)) parsed.cefrAnalysis.c2Elements = [];
+
     return parsed;
   } catch (e) {
-    console.error('JSON parse failed. Raw content was:', rawContent.slice(0, 300));
-    // If raw content is non-empty text, use it as the reply
-    if (rawContent && rawContent.trim().length > 0) {
-      return {
-        ...fallbackResponse(message),
-        reply: rawContent.trim().slice(0, 500),
-      };
-    }
+    console.error('JSON parse failed. Raw was:', rawContent.slice(0, 400));
     return fallbackResponse(message);
   }
 };
@@ -162,7 +156,6 @@ const sendMessage = async (req, res) => {
 
     const user = await User.findById(req.user._id);
 
-    // Find or create conversation
     let conversation;
     let convIndex = -1;
 
@@ -170,9 +163,7 @@ const sendMessage = async (req, res) => {
       convIndex = user.conversations.findIndex(
         (c) => c._id.toString() === conversationId
       );
-      if (convIndex !== -1) {
-        conversation = user.conversations[convIndex];
-      }
+      if (convIndex !== -1) conversation = user.conversations[convIndex];
     }
 
     if (!conversation) {
@@ -184,13 +175,11 @@ const sendMessage = async (req, res) => {
       conversation = user.conversations[convIndex];
     }
 
-    // Build conversation history (last 10 messages)
     const recentMessages = conversation.messages.slice(-10).map((m) => ({
       role: m.role,
       content: m.role === 'user' ? m.originalText || m.content : m.content,
     }));
 
-    // Call AI
     let aiResponse;
     try {
       const rawContent = await callAI([
@@ -204,11 +193,9 @@ const sendMessage = async (req, res) => {
       aiResponse = fallbackResponse(message);
     }
 
-    // Guarantee content is never empty (prevents Mongoose validation error)
-    const replyContent = (aiResponse.reply || '').trim() || "I'm here to help! Please continue.";
+    const replyContent = aiResponse.reply.trim() || "Please continue — I'm here to help!";
     const correctedContent = (aiResponse.correctedText || message).trim() || message;
 
-    // Save messages
     const userMsg = {
       role: 'user',
       content: message,
@@ -227,7 +214,6 @@ const sendMessage = async (req, res) => {
     user.conversations[convIndex].messages.push(assistantMsg);
     user.conversations[convIndex].updatedAt = new Date();
 
-    // Update stats
     user.stats.totalMessages += 1;
     const level = aiResponse.cefrAnalysis?.overallLevel;
     if (level === 'C1') user.stats.c1Count += 1;
@@ -257,11 +243,7 @@ const sendMessage = async (req, res) => {
     });
   } catch (error) {
     console.error('sendMessage error:', error.message);
-    console.error('Stack:', error.stack);
-    res.status(500).json({
-      message: 'Error processing your message',
-      detail: error.message,
-    });
+    res.status(500).json({ message: 'Error processing your message', detail: error.message });
   }
 };
 
