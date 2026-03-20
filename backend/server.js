@@ -28,21 +28,18 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/chat', require('./routes/chat'));
 
+// Test route (remove in production)
+app.use('/api/test', require('./routes/test'));
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'FluenC API is running 🚀' });
-});
-
-app.get("/", (req, res) => {
-  res.send("FluenC API is running...");
 });
 
 // 404 handler
 app.use('*', (req, res) => {
   res.status(404).json({ message: 'Route not found' });
 });
-
-
 
 // Error handler
 app.use((err, req, res, next) => {
